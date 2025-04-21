@@ -813,9 +813,85 @@ class HippoRAG:
                 num_new_chunks += 1
 
         return num_new_chunks
-
     def add_synonymy_edges(self):
         """
+        Adds synonymy edges between similar nodes in the graph to enhance connectivity by identifying and linking synonym entities.
+        Now considers both the phrase and its context for determining similarity.
+
+        Steps:
+        1. Retrieve phrases and their contexts.
+        2. Generate context-aware embeddings for each phrase.
+        3. Perform KNN search to find similar nodes based on context-aware embeddings.
+        4. Add synonymy edges for nodes with similarity above the threshold.
+        """
+        logger.info(f"Expanding graph with synonymy edges (context-aware)")
+
+        # Step 1: Retrieve phrases and their contexts
+        self.entity_id_to_row = self.entity_embedding_store.get_text_for_all_rows()
+        entity_node_keys = list(self.entity_id_to_row.keys())
+        contexts = {key: self.get_context_for_phrase(key) for key in entity_node_keys}  # Retrieve context for each phrase
+
+        # Step 2: Generate context-aware embeddings
+        logger.info(f"Generating context-aware embeddings for {len(entity_node_keys)} phrases.")
+        context_aware_texts = [
+            f"{self.entity_id_to_row[key]['content']} [CONTEXT] {contexts[key]}" for key in entity_node_keys
+        ]
+        entity_embs = self.embedding_model.batch_encode(context_aware_texts, norm=True)
+
+        # Step 3: Perform KNN search
+        logger.info(f"Performing KNN retrieval for context-aware embeddings.")
+        query_node_key2knn_node_keys = retrieve_knn(
+            query_ids=entity_node_keys,
+            key_ids=entity_node_keys,
+            query_vecs=entity_embs,
+            key_vecs=entity_embs,
+            k=self.global_config.synonymy_edge_topk,
+            query_batch_size=self.global_config.synonymy_edge_query_batch_size,
+            key_batch_size=self.global_config.synonymy_edge_key_batch_size
+        )
+
+        # Step 4: Add synonymy edges
+        num_synonym_triple = 0
+        for node_key in tqdm(query_node_key2knn_node_keys.keys(), total=len(query_node_key2knn_node_keys)):
+            synonyms = []
+            entity = self.entity_id_to_row[node_key]["content"]
+
+            if len(re.sub('[^A-Za-z0-9]', '', entity)) > 2:  # Ignore very short phrases
+                nns = query_node_key2knn_node_keys[node_key]
+
+                for nn, score in zip(nns[0], nns[1]):
+                    if score < self.global_config.synonymy_edge_sim_threshold:
+                        break
+
+                    nn_phrase = self.entity_id_to_row[nn]["content"]
+
+                    if nn != node_key and nn_phrase != '':
+                        sim_edge = (node_key, nn)
+                        synonyms.append((nn, score))
+                        num_synonym_triple += 1
+
+                        self.node_to_node_stats[sim_edge] = score
+
+        logger.info(f"Added {num_synonym_triple} synonymy edges based on context-aware embeddings.")
+
+    def get_context_for_phrase(self, phrase_key: str) -> str:
+        """
+        Retrieves the context for a given phrase key. This could be the sentence or document
+        where the phrase appears.
+
+        Parameters:
+            phrase_key (str): The key of the phrase.
+
+        Returns:
+            str: The context associated with the phrase.
+        """
+        # Example: Retrieve context from the embedding store or other sources
+        row = self.entity_id_to_row.get(phrase_key, {})
+        return row.get("context", "No context available")
+
+    '''
+        def add_synonymy_edges(self):
+        
         Adds synonymy edges between similar nodes in the graph to enhance connectivity by identifying and linking synonym entities.
 
         This method performs key operations to compute and add synonymy edges. It first retrieves embeddings for all nodes, then conducts
@@ -830,7 +906,7 @@ class HippoRAG:
                            `synonymy_edge_query_batch_size`, and `synonymy_edge_key_batch_size`.
             node_to_node_stats: dict. Stores scores for edges between nodes representing their relationship.
 
-        """
+        
         logger.info(f"Expanding graph with synonymy edges")
 
         self.entity_id_to_row = self.entity_embedding_store.get_all_id_to_rows()
@@ -876,6 +952,7 @@ class HippoRAG:
                         num_nns += 1
 
             synonym_candidates.append((node_key, synonyms))
+    '''
 
     def load_existing_openie(self, chunk_keys: List[str]) -> Tuple[List[dict], Set[str]]:
         """
