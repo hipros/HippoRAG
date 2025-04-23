@@ -14,13 +14,13 @@ import hashlib
 from src.hipporag.HippoRAG import HippoRAG
 from src.hipporag.utils.misc_utils import string_to_bool, compute_mdhash_id
 from src.hipporag.utils.config_utils import BaseConfig
-from src.hipporag.utils.openie_utils import text_processing
+#from src.hipporag.utils.openie_utils import text_processing
 from src.hipporag.utils.eval_utils import QAExactMatch, QAF1Score, RetrievalRecall
 
 
 def deeper_graph_analysis(hipporag, incorrect_data):
     """
-    그래프 탐색에 대한 보다 심층적인 분석
+    More in-depth analysis of graph exploration
     """
     for sample in incorrect_data:
         query = sample['question']
@@ -100,7 +100,6 @@ def get_gold_docs(samples: List, dataset_name: str = None) -> List:
         gold_docs.append(gold_doc)
     return gold_docs
 
-
 def get_gold_answers(samples):
     gold_answers = []
     for sample_idx in range(len(samples)):
@@ -129,77 +128,83 @@ def get_gold_answers(samples):
 
 def analyze_incorrect_samples(hipporag, queries, gold_docs, gold_answers, samples):
     """
-    HippoRAG에서 틀린 샘플을 분석하는 함수
+    Function to analyze incorrect samples in HippoRAG
     
     Args:
-        hipporag: HippoRAG 인스턴스
-        queries: 쿼리 리스트
-        gold_docs: 정답 문서 리스트
-        gold_answers: 정답 리스트
-        samples: 원본 데이터셋 샘플
+        hipporag: HippoRAG instance
+        queries: List of queries
+        gold_docs: List of gold documents
+        gold_answers: List of gold answers
+        samples: Original dataset samples
     
     Returns:
-        incorrect_data: 틀린 샘플에 대한 상세 정보를 담은 딕셔너리 리스트
+        incorrect_data: List of dictionaries containing detailed information about incorrect samples
     """
-    # 1. rag_qa 실행 및 결과 저장
-    logging.info("RAG QA 실행 및 결과 분석 중...")
+    # 1. Execute rag_qa and store results
+    logging.info("Executing RAG QA and analyzing results...")
     results = hipporag.rag_qa(queries=queries, gold_docs=gold_docs, gold_answers=gold_answers)
     
-    # 결과의 구조에 따라 적절히 변수 추출
-    if len(results) == 5:  # 평가 결과가 포함된 경우
+    # Extract variables according to result structure
+    if len(results) == 5:  # If evaluation results are included
         query_solutions, response_messages, metadata, retrieval_results, qa_results = results
     else:
         query_solutions, response_messages, metadata = results
         retrieval_results = qa_results = None
     
-    # 2. 틀린 샘플 식별
+    # 2. Identify incorrect samples
     incorrect_indices = []
     incorrect_data = []
+    
+    # Initialize F1 scorer
+    qa_f1_scorer = QAF1Score()
     
     for i, query_solution in enumerate(query_solutions):
         predicted_answer = query_solution.answer
         gold_answer_list = list(gold_answers[i])
         
-        # 대소문자 무시하고 공백 정규화하여 비교
-        predicted_answer_normalized = predicted_answer.lower().strip()
-        gold_answers_normalized = [ans.lower().strip() for ans in gold_answer_list]
+        # Use F1 Score to evaluate answer correctness
+        # Calculate F1 score for each gold answer and take the maximum
+        f1_scores = []
+        for gold_ans in gold_answer_list:
+            f1 = qa_f1_scorer.calculate(predicted_answer, gold_ans)
+            f1_scores.append(f1)
         
-        # 정답과 예측이 일치하지 않으면 틀린 샘플로 판단
-        is_correct = any(predicted_answer_normalized == g_ans for g_ans in gold_answers_normalized)
+        max_f1 = max(f1_scores) if f1_scores else 0
+        
+        # Consider incorrect if F1 score is below threshold (e.g., 0.5)
+        is_correct = max_f1 >= 0.5
         
         if not is_correct:
             incorrect_indices.append(i)
             
-            # 틀린 샘플에 대한 상세 정보 수집
+            # Collect detailed information about incorrect sample
             incorrect_sample = {
                 'index': i,
                 'original_sample': samples[i] if i < len(samples) else None,
                 'question': query_solution.question,
                 'predicted_answer': predicted_answer,
                 'gold_answers': gold_answer_list,
+                'max_f1_score': max_f1,
                 'retrieved_docs': query_solution.docs,
                 'doc_scores': query_solution.doc_scores.tolist() if hasattr(query_solution, 'doc_scores') else None,
             }
             
-            # 그래프 분석 정보 추가 (그래프 탐색이 어떻게 이루어졌는지 분석)
+            # Add graph analysis information (rest of your existing code)
             if hipporag.ready_to_retrieve:
-                # 쿼리에 대한 팩트 점수 및 리랭킹 정보 수집
                 try:
                     query_fact_scores = hipporag.get_fact_scores(query_solution.question)
                     top_k_fact_indices, top_k_facts, rerank_log = hipporag.rerank_facts(query_solution.question, query_fact_scores)
                     
                     incorrect_sample['graph_analysis'] = {
                         'top_k_facts': top_k_facts,
-                        'facts_before_rerank': rerank_log.get('facts_before_rerank', [])[:10],  # 상위 10개만
-                        'facts_after_rerank': rerank_log.get('facts_after_rerank', [])[:10],    # 상위 10개만
+                        'facts_before_rerank': rerank_log.get('facts_before_rerank', [])[:10],
+                        'facts_after_rerank': rerank_log.get('facts_after_rerank', [])[:10],
                         'top_entities': extract_top_entities(top_k_facts),
                         'reranking_details': rerank_log
                     }
                     
-                    # 페이지랭크 정보 수집 (만약 facts_after_rerank가 비어있지 않은 경우)
                     if len(top_k_facts) > 0:
                         try:
-                            # PPR 결과를 추론해볼 수 있을 것들 저장
                             passage_node_indices = [hipporag.node_name_to_vertex_idx.get(doc_id, -1) 
                                                   for doc_id in hipporag.passage_node_keys]
                             doc_scores = {}
@@ -215,28 +220,28 @@ def analyze_incorrect_samples(hipporag, queries, gold_docs, gold_answers, sample
             
             incorrect_data.append(incorrect_sample)
     
-    logging.info(f"총 {len(queries)} 개의 샘플 중 {len(incorrect_indices)} 개가 틀렸습니다. ({len(incorrect_indices)/len(queries)*100:.2f}%)")
+    logging.info(f"Out of {len(queries)} samples, {len(incorrect_indices)} were incorrect. ({len(incorrect_indices)/len(queries)*100:.2f}%)")
     
-    # 3. 틀린 샘플의 분석 결과 출력
+    # 3. Output analysis results for incorrect samples
     if incorrect_data:
         analyze_error_patterns(incorrect_data, gold_docs)
     
     return incorrect_data
 
 def extract_top_entities(top_k_facts):
-    """상위 팩트에서 엔티티 추출"""
+    """Extract entities from top facts"""
     entities = set()
     for fact in top_k_facts:
         if isinstance(fact, list) and len(fact) >= 3:
-            entities.add(fact[0])  # 주어
-            entities.add(fact[2])  # 목적어
+            entities.add(fact[0])  # Subject
+            entities.add(fact[2])  # Object
     return list(entities)
 
 def analyze_error_patterns(incorrect_data, gold_docs=None):
-    """틀린 샘플의 오류 패턴 분석"""
-    logging.info("\n=== 오류 패턴 분석 ===")
+    """Analysis of error patterns in incorrect samples"""
+    logging.info("\n=== Error Pattern Analysis ===")
     
-    # 1. 관련 문서가 검색되었으나 답변이 틀린 경우
+    # 1. Cases where relevant document was retrieved but answer is wrong
     docs_with_answer = 0
     
     for sample in incorrect_data:
@@ -245,49 +250,49 @@ def analyze_error_patterns(incorrect_data, gold_docs=None):
             sample_gold_docs = gold_docs[idx]
             retrieved_docs = sample['retrieved_docs']
             
-            # 검색된 문서 중 정답 문서가 있는지 확인
+            # Check if any gold document is in retrieved documents
             has_relevant_doc = any(gold_doc in retrieved_docs for gold_doc in sample_gold_docs)
             
             if has_relevant_doc:
                 docs_with_answer += 1
     
     if gold_docs:
-        logging.info(f"정답 문서가 검색되었으나 답변이 틀린 경우: {docs_with_answer}/{len(incorrect_data)} ({docs_with_answer/len(incorrect_data)*100:.2f}%)")
+        logging.info(f"Cases where answer document was retrieved but answer was wrong: {docs_with_answer}/{len(incorrect_data)} ({docs_with_answer/len(incorrect_data)*100:.2f}%)")
         
-        # 2. 리트리벌 오류: 정답 문서가 검색되지 않은 경우
+        # 2. Retrieval errors: cases where answer document was not retrieved
         retrieval_errors = len(incorrect_data) - docs_with_answer
-        logging.info(f"정답 문서가 검색되지 않은 경우: {retrieval_errors}/{len(incorrect_data)} ({retrieval_errors/len(incorrect_data)*100:.2f}%)")
+        logging.info(f"Cases where answer document was not retrieved: {retrieval_errors}/{len(incorrect_data)} ({retrieval_errors/len(incorrect_data)*100:.2f}%)")
     
-    # 3. 상위 3개 틀린 샘플 자세히 출력
-    logging.info("\n=== 상위 3개 틀린 샘플 분석 ===")
+    # 3. Detailed output for top 3 incorrect samples
+    logging.info("\n=== Analysis of Top 3 Incorrect Samples ===")
     for i, sample in enumerate(incorrect_data[:3]):
-        logging.info(f"\n샘플 #{i+1}")
-        logging.info(f"질문: {sample['question']}")
-        logging.info(f"정답: {sample['gold_answers']}")
-        logging.info(f"예측: {sample['predicted_answer']}")
-        logging.info(f"검색된 문서 (상위 3개):")
+        logging.info(f"\nSample #{i+1}")
+        logging.info(f"Question: {sample['question']}")
+        logging.info(f"Gold answers: {sample['gold_answers']}")
+        logging.info(f"Predicted: {sample['predicted_answer']}")
+        logging.info(f"F1 Score: {sample.get('max_f1_score', 'N/A')}")
+        logging.info(f"Retrieved documents (top 3):")
         for j, doc in enumerate(sample['retrieved_docs'][:3]):
-            logging.info(f"  {j+1}. {doc[:100]}... (점수: {sample['doc_scores'][j] if sample['doc_scores'] else 'N/A'})")
+            logging.info(f"  {j+1}. {doc[:100]}... (score: {sample['doc_scores'][j] if sample['doc_scores'] else 'N/A'})")
         
         if 'graph_analysis' in sample:
-            logging.info("그래프 분석:")
-            logging.info(f"  리랭킹 전 팩트 수: {len(sample['graph_analysis'].get('facts_before_rerank', []))}")
-            logging.info(f"  리랭킹 후 팩트 수: {len(sample['graph_analysis'].get('facts_after_rerank', []))}")
+            logging.info("Graph analysis:")
+            logging.info(f"  Facts before reranking: {len(sample['graph_analysis'].get('facts_before_rerank', []))}")
+            logging.info(f"  Facts after reranking: {len(sample['graph_analysis'].get('facts_after_rerank', []))}")
             if sample['graph_analysis'].get('facts_after_rerank'):
-                logging.info(f"  상위 팩트: {sample['graph_analysis']['facts_after_rerank'][0]}")
+                logging.info(f"  Top fact: {sample['graph_analysis']['facts_after_rerank'][0]}")
                 if 'top_entities' in sample['graph_analysis']:
-                    logging.info(f"  주요 엔티티: {', '.join(sample['graph_analysis']['top_entities'][:5])}")
+                    logging.info(f"  Key entities: {', '.join(sample['graph_analysis']['top_entities'][:5])}")
 
-# 저장 및 로드 함수
 def save_analysis_results(incorrect_data, filename="incorrect_samples_analysis.json"):
     with open(filename, 'w') as f:
         json.dump(incorrect_data, f, indent=2, ensure_ascii=False)
-    logging.info(f"분석 결과가 {filename}에 저장되었습니다.")
+    logging.info(f"Analysis results saved to {filename}")
 
 def visualize_error_distribution(incorrect_data, output_dir, dataset_name):
-    """오류 유형별 분포 시각화"""
+    """Visualization of error type distribution"""
     try:
-        # 오류 유형 분류
+        # Classify error types
         retrieval_errors = 0
         qa_errors = 0
         
@@ -303,30 +308,29 @@ def visualize_error_distribution(incorrect_data, output_dir, dataset_name):
                 else:
                     retrieval_errors += 1
             else:
-                # 골드 문서 정보가 없으면 QA 오류로 처리
                 qa_errors += 1
         
-        # 파이 차트로 시각화
-        labels = ['검색 오류', 'QA 오류']
+        # Visualize with pie chart
+        labels = ['Retrieval Error', 'QA Error']
         sizes = [retrieval_errors, qa_errors]
         colors = ['#ff9999','#66b3ff']
         
         plt.figure(figsize=(8, 6))
         plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
         plt.axis('equal')
-        plt.title(f'{dataset_name} 데이터셋의 틀린 샘플 오류 유형 분포')
+        plt.title(f'Error Type Distribution for {dataset_name} Dataset')
         plt.tight_layout()
         
-        # 결과 저장
+        # Save results
         viz_path = os.path.join(output_dir, f"{dataset_name}_error_distribution.png")
         plt.savefig(viz_path)
-        logging.info(f"오류 분포 시각화가 {viz_path}에 저장되었습니다.")
+        logging.info(f"Error distribution visualization saved to {viz_path}")
         
     except Exception as e:
-        logging.error(f"시각화 중 오류 발생: {str(e)}")
+        logging.error(f"Error during visualization: {str(e)}")
 
 def main():
-    parser = argparse.ArgumentParser(description="HippoRAG 오류 분석")
+    parser = argparse.ArgumentParser(description="HippoRAG Error Analysis")
     parser.add_argument('--dataset', type=str, default='musique', help='Dataset name')
     parser.add_argument('--llm_base_url', type=str, default='https://api.openai.com/v1', help='LLM base URL')
     parser.add_argument('--llm_name', type=str, default='gpt-4o-mini', help='LLM name')
