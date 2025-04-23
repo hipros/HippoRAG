@@ -1,0 +1,12 @@
+# Step 5: Create or modify the configuration file
+# Either `src/hipporag/config/default_config.yaml` or another appropriate location
+
+"""
+retriever:
+  type: "tog"  # Change from "ppr" to "tog"
+  params:
+    max_iterations: 10
+    max_children: 3
+    traversal_strategy: "dfs"  # Options: "dfs", "bfs", or "priority"
+    verbose: false
+"""
