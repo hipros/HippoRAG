@@ -21,16 +21,26 @@ from src.hipporag.utils.eval_utils import QAExactMatch, QAF1Score, RetrievalReca
 def deeper_graph_analysis(hipporag, incorrect_data):
     """
     More in-depth analysis of graph exploration
+
+    The detailed analysis includes:
+    1. Graph distance analysis between the gold document and the retrieved documents.
+    2. Graph community analysis to identify the relationship between entities in the retrieved documents.
+    
+    Args:
+        hipporag: HippoRAG instance
+        incorrect_data: List of dictionaries containing detailed information about incorrect samples
+    Returns:
+        incorrect_data: Updated list of dictionaries with additional graph analysis
     """
     for sample in incorrect_data:
         query = sample['question']
         
-        # 1. 정답 문서와 검색된 문서 사이의 그래프 거리 측정
+        # 1. measure the graph distance between the gold document and the retrieved documents
         if 'gold_docs' in sample and sample['gold_docs']:
             gold_doc_ids = [compute_mdhash_id(doc, prefix="chunk-") for doc in sample['gold_docs']]
             retrieved_doc_ids = [compute_mdhash_id(doc, prefix="chunk-") for doc in sample['retrieved_docs']]
             
-            # 그래프에서 최단 경로 찾기
+            # Find the shortest path between the gold document and the retrieved documents
             shortest_paths = []
             for gold_id in gold_doc_ids:
                 for ret_id in retrieved_doc_ids[:5]:  # 상위 5개 검색 문서만 확인
@@ -47,14 +57,14 @@ def deeper_graph_analysis(hipporag, incorrect_data):
             
             sample['graph_distance_analysis'] = shortest_paths
         
-        # 2. 그래프 커뮤니티 분석
+        # 2. analyze the community structure of the retrieved documents
         try:
-            # 리트리벌과 관련된 서브그래프 추출
+            # Extract subgraph related to retrieval
             if 'graph_analysis' in sample and 'top_entities' in sample['graph_analysis']:
                 entity_keys = [compute_mdhash_id(entity, prefix="entity-") 
                               for entity in sample['graph_analysis']['top_entities']]
                 
-                # 서브그래프에서 커뮤니티 탐지 (필요시)
+                # detect communities in the subgraph (if needed)
                 # communities = hipporag.graph.community_multilevel(weights='weight')
                 
                 # 엔티티 간 연결 구조 분석
@@ -65,7 +75,7 @@ def deeper_graph_analysis(hipporag, incorrect_data):
                             idx1 = hipporag.node_name_to_vertex_idx[e1]
                             idx2 = hipporag.node_name_to_vertex_idx[e2]
                             
-                            # 두 엔티티 간 연결 확인
+                            # Check if two entities are connected
                             if hipporag.graph.are_connected(idx1, idx2):
                                 connections.append((e1, e2))
                 
@@ -76,6 +86,14 @@ def deeper_graph_analysis(hipporag, incorrect_data):
     return incorrect_data
 
 def get_gold_docs(samples: List, dataset_name: str = None) -> List:
+    """
+    Function to extract gold documents from samples
+    Args:
+        samples: List of samples
+        dataset_name: Name of the dataset (e.g., 'hotpotqa', '2wikimultihopqa')
+    Returns:
+        gold_docs: List of gold documents
+    """
     gold_docs = []
     for sample in samples:
         if 'supporting_facts' in sample:  # hotpotqa, 2wikimultihopqa
@@ -354,11 +372,10 @@ def main():
     else:
         save_dir = save_dir + '_' + dataset_name
 
-    # 분석 결과 저장 디렉토리 생성
     analysis_dir = f"{args.analysis_dir}/{dataset_name}"
     os.makedirs(analysis_dir, exist_ok=True)
 
-    # 로깅 설정
+    # logging configuration
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -375,31 +392,31 @@ def main():
         corpus = json.load(f)
 
     docs = [f"{doc['title']}\n{doc['text']}" for doc in corpus]
-    logging.info(f"코퍼스 문서 수: {len(docs)}")
+    logging.info(f"The number of corpus documents: {len(docs)}")
 
     force_index_from_scratch = string_to_bool(args.force_index_from_scratch)
     force_openie_from_scratch = string_to_bool(args.force_openie_from_scratch)
 
     # Prepare datasets and evaluation
     samples_path = f"reproduce/dataset/{dataset_name}.json"
-    logging.info(f"데이터셋 로딩: {samples_path}")
+    logging.info(f"loading samples from {samples_path}")
     samples = json.load(open(samples_path, "r"))
     
-    # 샘플 수 제한 (개발 및 디버깅용)
+    # constraint the number of samples for development and debugging
     if args.limit_samples:
         samples = samples[:args.limit_samples]
-        logging.info(f"샘플 수 제한: {args.limit_samples}개")
+        logging.info(f"constrainted samples: {args.limit_samples}")
 
     all_queries = [s['question'] for s in samples]
-    logging.info(f"쿼리 수: {len(all_queries)}")
+    logging.info(f"The number of queries: {len(samples)}")
 
     gold_answers = get_gold_answers(samples)
     try:
         gold_docs = get_gold_docs(samples, dataset_name)
         assert len(all_queries) == len(gold_docs) == len(gold_answers), "Length of queries, gold_docs, and gold_answers should be the same."
-        logging.info(f"골드 문서 및 답변 로드 완료")
+        logging.info(f"The number of gold documents: {len(gold_docs)}")
     except Exception as e:
-        logging.warning(f"골드 문서 로드 중 오류: {str(e)}")
+        logging.warning(f"error during loading gold documents: {str(e)}")
         gold_docs = None
 
     config = BaseConfig(
@@ -422,30 +439,30 @@ def main():
         openie_mode=args.openie_mode
     )
 
-    logging.info("HippoRAG 인스턴스 생성")
+    logging.info("generate HippoRAG instance")
     hipporag = HippoRAG(global_config=config)
 
-    # 이미 인덱싱되어 있을 경우 건너뛸 수 있음
+    # This can be skipped if already indexed
     if force_index_from_scratch:
-        logging.info("문서 인덱싱 시작")
+        logging.info("starting to index documents")
         hipporag.index(docs)
     else:
-        logging.info("기존 인덱스를 사용하여 리트리벌 준비")
+        logging.info("preparing to use existing index")
         if not hipporag.ready_to_retrieve:
             hipporag.prepare_retrieval_objects()
 
-    # 틀린 샘플 분석
-    logging.info("틀린 샘플 분석 시작")
+    # analyze incorrect samples
+    logging.info("analyzing incorrect samples...")
     incorrect_data = analyze_incorrect_samples(hipporag, all_queries, gold_docs, gold_answers, samples)
     
-    # 분석 결과 저장
+    # save analysis results
     analysis_file = f"{analysis_dir}/incorrect_samples_{time.strftime('%Y%m%d_%H%M%S')}.json"
     save_analysis_results(incorrect_data, analysis_file)
     
-    # 오류 분포 시각화
+    # visualize error distribution
     visualize_error_distribution(incorrect_data, analysis_dir, dataset_name)
     
-    logging.info("분석 완료")
+    logging.info("completed successfully")
 
 if __name__ == "__main__":
     main()

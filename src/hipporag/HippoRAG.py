@@ -159,7 +159,6 @@ class HippoRAG:
 
         self.ent_node_to_chunk_ids = None
 
-
     def initialize_graph(self):
         """
         Initializes a graph using a Pickle file if available or creates a new graph.
@@ -1136,13 +1135,15 @@ class HippoRAG:
         logger.info("Loading keys.")
         self.query_to_embedding: Dict = {'triple': {}, 'passage': {}}
 
-        self.entity_node_keys: List = list(self.entity_embedding_store.get_all_ids()) # a list of phrase node keys
-        self.passage_node_keys: List = list(self.chunk_embedding_store.get_all_ids()) # a list of passage node keys
+        # a list of phrase node keys and passage node keys
+        self.entity_node_keys: List = list(self.entity_embedding_store.get_all_ids()) 
+        self.passage_node_keys: List = list(self.chunk_embedding_store.get_all_ids()) 
         self.fact_node_keys: List = list(self.fact_embedding_store.get_all_ids())
 
         assert len(self.entity_node_keys) + len(self.passage_node_keys) == self.graph.vcount()
-
-        igraph_name_to_idx = {node["name"]: idx for idx, node in enumerate(self.graph.vs)} # from node key to the index in the backbone graph
+        
+        # from node key to the index in the backbone graph
+        igraph_name_to_idx = {node["name"]: idx for idx, node in enumerate(self.graph.vs)} 
         self.node_name_to_vertex_idx = igraph_name_to_idx
         self.entity_node_idxs = [igraph_name_to_idx[node_key] for node_key in self.entity_node_keys] # a list of backbone graph node index
         self.passage_node_idxs = [igraph_name_to_idx[node_key] for node_key in self.passage_node_keys] # a list of backbone passage node index
@@ -1426,27 +1427,35 @@ class HippoRAG:
 
     def rerank_facts(self, query: str, query_fact_scores: np.ndarray) -> Tuple[List[int], List[Tuple], dict]:
         """
+        Rerank facts based on their relevance to the query
 
         Args:
+            query (str): The input query string for which facts need to be reranked.
+            query_fact_scores (np.ndarray): An array of scores representing fact-query similarity
 
         Returns:
-            top_k_fact_indicies:
-            top_k_facts:
-            rerank_log (dict): {'facts_before_rerank': candidate_facts, 'facts_after_rerank': top_k_facts}
+            top_k_fact_indices (list): list of indices of top_k_facts in the original fact list.
+            top_k_facts (list): list of top_k_facts (each fact is a relation triple in tuple data type).
+            reerank_log (dict): A dictionary containing the facts before and after reranking.
+                {'facts_before_rerank': candidate_facts, 'facts_after_rerank': top_k_facts}
                 - candidate_facts (list): list of link_top_k facts (each fact is a relation triple in tuple data type).
-                - top_k_facts:
-
-
+                - top_k_facts (list): list of top_k_facts (each fact is a relation triple in tuple data type).
         """
         # load args
         link_top_k: int = self.global_config.linking_top_k
 
+        # list of ranked link_top_k fact relative indices
         candidate_fact_indices = np.argsort(query_fact_scores)[-link_top_k:][
-                                 ::-1].tolist()  # list of ranked link_top_k fact relative indices
+                                 ::-1].tolist()  
+        
+        # list of ranked link_top_k fact keys
         real_candidate_fact_ids = [self.fact_node_keys[idx] for idx in
-                                   candidate_fact_indices]  # list of ranked link_top_k fact keys
+                                   candidate_fact_indices]
+        
         fact_row_dict = self.fact_embedding_store.get_rows(real_candidate_fact_ids)
-        candidate_facts = [eval(fact_row_dict[id]['content']) for id in real_candidate_fact_ids]  # list of link_top_k facts (each fact is a relation triple in tuple data type)
+
+        # list of link_top_k facts (each fact is a relation triple in tuple data type)
+        candidate_facts = [eval(fact_row_dict[id]['content']) for id in real_candidate_fact_ids]
 
         top_k_fact_indices, top_k_facts, reranker_dict = self.rerank_filter(query,
                                                                              candidate_facts,
