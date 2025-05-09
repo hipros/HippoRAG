@@ -1,7 +1,7 @@
 import re
 import string
 
-def normalize_answer(answer: str) -> str:
+def normalize_answer(answer) -> str:
     """
     Normalize a given string by applying the following transformations:
     1. Convert the string to lowercase.
@@ -10,11 +10,20 @@ def normalize_answer(answer: str) -> str:
     4. Normalize whitespace by collapsing multiple spaces into one.
 
     Args:
-        answer (str): The input string to be normalized.
+        answer: The input to be normalized (str, set, etc.)
 
     Returns:
         str: The normalized string.
     """
+    # Convert answer to string if it's not already a string
+    if not isinstance(answer, str):
+        if isinstance(answer, set) and len(answer) > 0:
+            # Convert set to a string by joining elements
+            answer = ' '.join(str(elem) for elem in answer)
+        else:
+            # For any other type, convert to string
+            answer = str(answer)
+            
     def remove_articles(text):
         return re.sub(r"\b(a|an|the)\b", " ", text)
 
