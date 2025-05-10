@@ -146,6 +146,20 @@ class EmbeddingStore:
     def get_row(self, hash_id):
         return self.hash_id_to_row[hash_id]
 
+    def get_string(self, hash_id):
+        """
+        Returns the text content for a given hash ID.
+        
+        Parameters:
+            hash_id (str): The hash ID of the document.
+        
+        Returns:
+            str: The text content of the document.
+        """
+        if hash_id in self.hash_id_to_row:
+            return self.hash_id_to_row[hash_id]['content']
+        return ""
+
     def get_hash_id(self, text):
         return self.text_to_hash_id[text]
 
@@ -158,6 +172,15 @@ class EmbeddingStore:
         return results
 
     def get_all_ids(self):
+        return deepcopy(self.hash_ids)
+
+    def get_all_string_ids(self):
+        """
+        Returns all document IDs stored in the embedding store.
+        
+        Returns:
+            List[str]: List of all document IDs (hash IDs).
+        """
         return deepcopy(self.hash_ids)
 
     def get_all_id_to_rows(self):
